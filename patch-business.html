@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!--
+  =====================================================================
+  PATCH - BUSINESS DESKTOP, LINKED VERSION  (patch-business.html)
+  =====================================================================
+  This is the screen a council or business uses to see open cases,
+  triage the most urgent, and assign a worker.
+
+  LINKED means this page shares its data with patch-community.html and
+  patch-worker.html through the browser's storage. Reports made on the
+  community page appear here, and cases update when the worker accepts
+  or fixes them. All three pages must be open in the SAME browser on
+  the SAME device, and loaded from the same website address.
+
+  Screens in this file:
+    1. Loading screen - "Patch" text with a 10 second bar
+    2. Dashboard      - left: open cases sorted by urgency
+                        right: the selected case (map, photo, assign options)
+
+  The file has these parts:
+    PART 1: <head>   - page title, fonts and all the CSS (colours, layout)
+    PART 2: <body>   - the loading screen and an empty dashboard
+    PART 3: <script> - shared data section, then this screen's logic
+
+  The "SHARED DATA" section in the script is identical in all three
+  linked files. If you change it in one, change it in all three.
+
+  Note: only Matt's phone (patch-worker.html) is connected in this demo.
+  Assigning Priya or Sam changes the status here, but no phone shows it.
+-->
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Patch - Business</title>
+
+  <!-- Fonts from Google: Barlow Condensed for headings, Barlow for body text -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+
+  <style>
+
+    /* ===============================================================
+       COLOURS AND SETTINGS
+       Change a colour here and it updates across the whole page.
+       =============================================================== */
+    :root {
+      --bg:   #e6e9e8;   /* page background */
+      --card: #ffffff;   /* white boxes */
+      --ink:  #14181b;   /* main text colour (near black) */
+      --mut:  #5d686e;   /* muted grey text */
+      --line: #d5dad9;   /* thin borders */
+      --or:   #f26a1b;   /* Patch orange */
+      --ok:   #17855a;   /* green */
+      --bad:  #c93a2b;   /* red */
+      --hd: 'Barlow Condensed', 'Arial Narrow', sans-serif;   /* heading font */
+    }
+
+    /* Dark mode: used automatically if the computer is set to dark */
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #101416; --card: #1b2124; --ink: #eef2f3; --mut: #9aa7ad; --line: #2d3639; }
+    }
+
+    /* ===============================================================
+       BASIC RESETS AND TEXT
+       =============================================================== */
+    * { box-sizing: border-box; margin: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.4 Barlow, system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* Headings use the condensed "road sign" font */
+    h1, h2, h3, .hd { font-family: var(--hd); font-weight: 700; letter-spacing: .2px; }
+
+    /* ===============================================================
+       BUTTONS
+       =============================================================== */
+    button {
+      font: inherit;
+      cursor: pointer;
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-weight: 600;
+      background: var(--line);
+      color: var(--ink);
+    }
+    button:focus-visible { outline: 3px solid var(--or); outline-offset: 2px; }
+
+    /* ===============================================================
+       LOADING SCREEN (identical in all three Patch files)
+       Full-screen black cover with "Patch" and a bar that fills in 10 seconds.
+       =============================================================== */
+    #load {
+      position: fixed;
+      inset: 0;
+      z-index: 9;
+      background: #14181b;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+    }
+    #load h1 { font-size: 88px; color: #f26a1b; line-height: 1; }
+    #load .t { width: min(260px, 70vw); height: 8px; background: #ffffff2a; border-radius: 9px; overflow: hidden; }
+    #load .t i { display: block; height: 100%; background: #f26a1b; width: 0; animation: ld 10s linear forwards; }  /* "10s" = loading time */
+    @keyframes ld { to { width: 100%; } }
+    #load button { background: none; color: #9aa7ad; font-size: 13px; }   /* "Skip loading" link */
+
+    /* ===============================================================
+       DASHBOARD LAYOUT
+       Two columns: case list on the left, selected case on the right.
+       =============================================================== */
+    .stage { display: flex; flex-direction: column; align-items: center; padding: 16px 10px 30px; }
+
+    .desk {
+      width: min(1180px, 100%);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      min-height: 680px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Black header bar at the top */
+    .bar { background: var(--ink); color: var(--bg); padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+    .bar h2 { flex: 1; font-size: 28px; }
+
+    /* Small helper links under the dashboard (outside the main window) */
+    .tools { margin-top: 12px; display: flex; gap: 12px; }
+    .tools button { background: none; color: var(--mut); font-size: 13px; padding: 4px 8px; text-decoration: underline; }
+
+    .dg { display: grid; grid-template-columns: minmax(300px, 420px) 1fr; flex: 1; }
+    .dg > div { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .dg > div:first-child { border-right: 1px solid var(--line); }
+
+    .two  { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }   /* two equal columns */
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }  /* box */
+
+    /* A clickable row in the case list or the worker list */
+    .row {
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px;
+      border: 2px solid var(--line);
+      border-radius: 10px;
+      cursor: pointer;
+      background: var(--card);
+      width: 100%;
+      text-align: left;
+      color: var(--ink);
+    }
+    .row.on { border-color: var(--or); }   /* the selected case */
+    .row b  { flex: 1; }
+
+    /* Photo box. Shows a grey striped placeholder if there is no photo. */
+    .ph-img {
+      height: 170px;
+      border-radius: 10px;
+      overflow: hidden;
+      background: repeating-linear-gradient(135deg, #8b8f90, #8b8f90 12px, #9a9ea0 12px, #9a9ea0 24px);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      font-weight: 600;
+    }
+    .ph-img img { width: 100%; height: 100%; object-fit: cover; }
+
+    .map { width: 100%; display: block; background: #dfe6dc; }   /* the drawn map */
+
+    /* Small rounded tags such as "Critical" or "Open" */
+    .pill { display: inline-block; border-radius: 99px; padding: 2px 10px; font-weight: 600; font-size: 13px; background: var(--line); }
+    .Critical { background: #c93a2b; color: #fff; }
+    .High     { background: #f26a1b; color: #fff; }
+    .Medium   { background: #ffc933; color: #14181b; }
+    .Low      { background: #cfd8d5; }
+    .Fixed    { background: var(--ok); color: #fff; }
+
+    /* ===============================================================
+       SMALL SCREENS
+       The two columns stack on top of each other.
+       =============================================================== */
+    @media (max-width: 760px) {
+      .stage { padding: 0 0 20px; }
+      .desk { border-radius: 0; border: 0; }
+      .dg { grid-template-columns: 1fr; }
+      .dg > div:first-child { border-right: 0; border-bottom: 1px solid var(--line); }
+      .two { grid-template-columns: 1fr; }
+    }
+
+  </style>
+</head>
+
+
+<body>
+
+  <!-- ===============================================================
+       PART 2: PAGE STRUCTURE
+       -->
+
+  <!-- Loading screen (removed after 10 seconds or when "Skip loading" is pressed) -->
+  <div id="load">
+    <h1 class="hd">Patch</h1>
+    <div class="t"><i></i></div>
+    <button onclick="skip()">Skip loading</button>
+  </div>
+
+  <!-- The dashboard. The JavaScript below fills it in. -->
+  <main class="stage">
+    <div class="desk" id="desk"></div>
+    <div class="tools">
+      <button onclick="addSample()">Add sample report</button>
+      <button onclick="resetDemo()">Reset demo (all three pages)</button>
+    </div>
+  </main>
+
+
+  <script>
+
+    /* ===============================================================
+       PART 3: JAVASCRIPT
+       =============================================================== */
+
+    /* Shortcut: $('abc') means "find the element with id abc" */
+    const $ = s => document.getElementById(s);
+
+
+    /* ===============================================================
+       SHARED DATA  (identical in all three linked files)
+       ---------------------------------------------------------------
+       The list of cases is saved in the browser's storage under one
+       name (KEY). Every page reads and writes the same list, which is
+       how the three pages "talk" to each other.
+       =============================================================== */
+    const KEY = 'patch_demo_v1';   // the storage name shared by all three pages
+
+    /* The three reports that are already in the system at the start.
+       status goes:  Open -> Assigned -> Accepted -> Fixed
+       score is used to sort by urgency (higher = more urgent) */
+    const SEED = () => [
+      { id: 'C-101', title: 'Streetlight out',          loc: 'Smith St',    urgency: 'High',   score: 78, status: 'Open', desc: 'Light out at the crossing. Dark at night.' },
+      { id: 'C-102', title: 'Broken bench',             loc: 'Albert Park', urgency: 'Medium', score: 62, status: 'Open', desc: 'Slat missing on the bench by the playground.' },
+      { id: 'C-103', title: 'Graffiti on toilet block', loc: 'Albert Park', urgency: 'Low',    score: 30, status: 'Open', desc: 'Tagging on the east wall.' }
+    ];
+
+    /* If the browser blocks storage (some private windows do), the app
+       falls back to memory. It still works, but the pages cannot share. */
+    let useMem = false, mem = null, lastRaw = null;
+    try { localStorage.setItem('patch_test', '1'); localStorage.removeItem('patch_test'); } catch (e) { useMem = true; }
+
+    function rawGet() { return useMem ? mem : localStorage.getItem(KEY); }
+    function rawSet(v) {
+      if (useMem) { mem = v; return true; }
+      try { localStorage.setItem(KEY, v); return true; } catch (e) { return false; }   // false = storage full
+    }
+
+    /* Read the list of cases (fills in the starting reports if empty) */
+    function loadCases() {
+      const raw = rawGet();
+      if (raw) { try { return JSON.parse(raw); } catch (e) { /* damaged data, start again below */ } }
+      const s = SEED();
+      saveCases(s);
+      return s;
+    }
+
+    /* Save the list of cases. Returns false if the browser ran out of room. */
+    function saveCases(c) {
+      const raw = JSON.stringify(c);
+      const ok = rawSet(raw);
+      if (ok) lastRaw = raw;
+      return ok;
+    }
+
+    /* Put everything back to the starting reports */
+    function resetAll() { saveCases(SEED()); }
+
+    /* Checks the storage once a second. If another page changed the
+       data, the function you pass in (cb) is called so this page can update. */
+    function watch(cb) {
+      lastRaw = rawGet();
+      setInterval(() => {
+        const r = rawGet();
+        if (r !== lastRaw) { lastRaw = r; cb(); }
+      }, 1000);
+    }
+
+    /* Shrinks a chosen photo so it fits in storage, then hands back the result */
+    function shrinkPhoto(file, done) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const max = 900;                                     // longest side in pixels
+          const k = Math.min(1, max / Math.max(img.width, img.height));
+          const c = document.createElement('canvas');
+          c.width = Math.round(img.width * k);
+          c.height = Math.round(img.height * k);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          done(c.toDataURL('image/jpeg', 0.7));                // 0.7 = quality
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+    /* ==================== end of SHARED DATA ==================== */
+
+
+    /* ---------------------------------------------------------------
+       LOADING SCREEN
+       Removed after 10 seconds, or earlier with "Skip loading".
+       --------------------------------------------------------------- */
+    function skip() { const l = $('load'); if (l) l.remove(); }
+    setTimeout(skip, 10000);   // 10000 milliseconds = 10 seconds
+
+
+    /* ---------------------------------------------------------------
+       THE MAP
+       Draws a simple map as an image (SVG). It is an illustration, not
+       a live map. pin = 1 shows the red damage pin.
+       --------------------------------------------------------------- */
+    const MAP = pin => `
+      <svg class="map" viewBox="0 0 300 330" preserveAspectRatio="xMidYMid slice" aria-label="Map">
+        <rect width="300" height="330" fill="#dfe6dc"/>
+        <rect x="20"  y="30"  width="120" height="110" rx="10" fill="#b9d8b0"/>   <!-- park -->
+        <rect x="170" y="190" width="110" height="110" rx="10" fill="#c9dcc2"/>   <!-- green block -->
+        <path d="M0 170H300M150 0V330M0 60L300 280" stroke="#fff" stroke-width="14" fill="none"/>   <!-- roads -->
+        <path d="M0 170H300M150 0V330" stroke="#c7cdca" stroke-width="1.5" stroke-dasharray="6 6" fill="none"/>  <!-- road lines -->
+        <text x="34" y="92" font-size="11" fill="#3c6b3a" font-family="Barlow">Albert Park</text>
+        ${pin ? `
+          <path d="M150 120c-13 0-23 10-23 22 0 17 23 38 23 38s23-21 23-38c0-12-10-22-23-22z" fill="#c93a2b" stroke="#fff" stroke-width="3"/>
+          <circle cx="150" cy="142" r="8" fill="#fff"/>` : ''}
+      </svg>`;
+
+
+    /* ---------------------------------------------------------------
+       WORKERS
+       The people the business can assign. Edit names and skills here.
+       Only Matt is connected to a phone page in this demo.
+       --------------------------------------------------------------- */
+    const W = [
+      { n: 'Matt',  s: 'Paving and concrete', d: '0.8 km' },
+      { n: 'Priya', s: 'General repairs',     d: '1.4 km' },
+      { n: 'Sam',   s: 'Landscaping',         d: '2.1 km' }
+    ];
+
+    /* Which case is selected. null means "show the most urgent one". */
+    let selected = null;
+
+
+    /* ---------------------------------------------------------------
+       BUTTON ACTIONS
+       --------------------------------------------------------------- */
+
+    /* Runs when a case in the left list is clicked */
+    function select(id) { selected = id; render(); }
+
+    /* Runs when the business clicks a worker: assigns the case to them.
+       Matt's phone page picks this up and shows the job. */
+    function assign(id, name) {
+      const cases = loadCases();
+      const c = cases.find(x => x.id === id);
+      c.status = 'Assigned';
+      c.worker = name;
+      c.rejected = null;    // clear any earlier rejection message
+      saveCases(cases);
+      render();
+    }
+
+    /* Adds a sample Critical report (no photo) so this page can be
+       demoed on its own, without using the community page */
+    function addSample() {
+      const cases = loadCases();
+      cases.push({
+        id: 'C-' + (101 + cases.length),
+        title: 'Footpath damage in park',
+        loc: 'Albert Park, near the oak trees',
+        urgency: 'Critical',
+        score: 95,
+        status: 'Open',
+        desc: 'Uneven slab on the main path. Trip hazard for children and wheelchairs.'
+      });
+      saveCases(cases);
+      selected = null;
+      render();
+    }
+
+    /* Puts all three pages back to the start */
+    function resetDemo() {
+      resetAll();
+      selected = null;
+      render();
+    }
+
+
+    /* ===============================================================
+       DRAW THE DASHBOARD
+       Left: counters and case list sorted by urgency.
+       Right: details of the selected case.
+       =============================================================== */
+    function render() {
+      const cases = loadCases();
+
+      /* Sort so the most urgent case is first */
+      const L = [...cases].sort((a, b) => b.score - a.score);
+
+      /* The selected case, or the most urgent one if none is selected */
+      const c = cases.find(x => x.id === selected) || L[0];
+
+      const open = cases.filter(x => x.status === 'Open').length;
+
+      /* Photo, or grey placeholder if there is none */
+      const pic = x => x ? `<img src="${x}" alt="Photo">` : 'Photo of damage';
+
+      /* What to say about a case that has already been assigned */
+      const statusLine = x =>
+        x.status === 'Assigned' ? `Worker: ${x.worker}. Waiting for ${x.worker} to accept.`
+        : x.status === 'Accepted' ? `Worker: ${x.worker}. ${x.worker} accepted this case and is on the way.`
+        : `Fixed by ${x.worker}.`;
+
+      $('desk').innerHTML = `
+        <div class="bar"><h2>Patch for business</h2><span>Parks team</span></div>
+
+        <div class="dg">
+
+          <!-- LEFT COLUMN: counters and case list -->
+          <div>
+            <div class="two">
+              <div class="card"><div class="hd" style="font-size:34px">${open}</div>Open cases</div>
+              <div class="card"><div class="hd" style="font-size:34px">${cases.filter(x => x.status === 'Fixed').length}</div>Fixed</div>
+            </div>
+
+            <b>Triage: most urgent first</b>
+            ${L.map(x => `
+              <button class="row ${x.id === c.id ? 'on' : ''}" onclick="select('${x.id}')">
+                <b>${x.title}<br><small style="color:var(--mut);font-weight:400">${x.id} · ${x.loc}</small></b>
+                <span class="pill ${x.urgency}">${x.urgency}</span>
+                <span class="pill ${x.status === 'Fixed' ? 'Fixed' : ''}">${x.status}</span>
+              </button>`).join('')}
+          </div>
+
+          <!-- RIGHT COLUMN: details of the selected case -->
+          <div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <h2 style="font-size:30px;flex:1">${c.title}</h2>
+              <span class="pill ${c.urgency}">${c.urgency}</span>
+            </div>
+            <p style="color:var(--mut)">${c.loc}</p>
+            <p>${c.desc}</p>
+
+            <!-- Same map as the phone, plus the photo the community member uploaded -->
+            <div class="two">
+              <div style="border-radius:10px;overflow:hidden;height:170px">${MAP(1)}</div>
+              <div class="ph-img">${pic(c.photo)}</div>
+            </div>
+
+            <!-- After the worker marks it fixed: show their photo and note -->
+            ${c.fixedPhoto ? `
+              <b>After the fix</b>
+              <div class="ph-img">${pic(c.fixedPhoto)}</div>` : ''}
+            ${c.status === 'Fixed' ? `<p><b>${c.worker}:</b> ${c.note || 'Marked as fixed.'}</p>` : ''}
+
+            <!-- While Open: show the list of workers to assign.
+                 Otherwise: show the current status. -->
+            ${c.status === 'Open' ? `
+              <b>Assign this case</b>
+              ${c.rejected ? `<div class="card" style="border-color:var(--bad)">${c.rejected} rejected this case. Choose another worker.</div>` : ''}
+              ${W.map(w => `
+                <button class="row" onclick="assign('${c.id}','${w.n}')">
+                  <b>${w.n}<br><small style="color:var(--mut);font-weight:400">${w.s} · ${w.d} · Verified and insured</small></b>
+                  <span class="pill">Assign</span>
+                </button>`).join('')}
+            ` : `
+              <div class="card">
+                <b>Status: ${c.status}</b><br>
+                ${statusLine(c)}
+              </div>`}
+          </div>
+
+        </div>`;
+    }
+
+
+    /* ---------------------------------------------------------------
+       KEEP IN SYNC
+       When another page changes the data, redraw this page.
+       --------------------------------------------------------------- */
+    watch(render);
+
+    /* Start the app */
+    render();
+
+  </script>
+</body>
+</html>
